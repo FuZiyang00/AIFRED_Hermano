@@ -1,7 +1,7 @@
 /**
  * Torque control example of adaptive gripper with pressure feedback.
  * Based on SimpleFOC library.
- * Implementa controllo automatico di pressione con soglie e derivata
+ * Implements automatic pressure control with thresholds and derivative
  */
 #include "TLE5012Sensor.h"
 #include "TLx493D_inc.hpp"
@@ -44,12 +44,12 @@ const int CALIBRATION_SAMPLES = 20;
 double xOffset = 0, yOffset = 0, zOffset = 0;
 
 // Pressure control parameters
-#define PRESSURE_MAX 0.5     // Soglia massima (calibrare)
-#define PRESSURE_MIN 0.0      // Soglia minima (calibrare)
-#define DP_DT_THRESHOLD 1.0    // 1%/s di variazione pressione
-#define TIMEOUT_MS 10000       // Timeout sicurezza
-#define SMOOTHING_FACTOR 0.3   // Filtro derivata esponenziale
-#define DPDT_STABLE_SAMPLES 100  // Numero di campioni per considerare la derivata stabile (valore da calibrare)
+#define PRESSURE_MAX 0.5     // Maximum threshold (to be calibrated)
+#define PRESSURE_MIN 0.0     // Minimum threshold (to be calibrated)
+#define DP_DT_THRESHOLD 1.0  // 1%/s pressure variation
+#define TIMEOUT_MS 10000     // Safety timeout
+#define SMOOTHING_FACTOR 0.3 // Exponential derivative filter
+#define DPDT_STABLE_SAMPLES 100  // Number of samples to consider derivative stable (value to be calibrated)
 #define ANGULAR_VELOCITY_THRESHOLD 0.1 // Threshold for angular velocity
 #define ANGLE_STABLE_SAMPLES 50     // Number of samples to consider angle stable
 
@@ -63,7 +63,7 @@ bool isClosing = false;
 bool prevButton1State = HIGH;
 bool prevButton2State = HIGH;  // Add tracking for button 2
 bool canClose = true;          // New flag to control if closing is allowed
-int dpdtStableCount = 0; // Contatore per campioni con derivata bassa
+int dpdtStableCount = 0; // Counter for samples with low derivative
 float previousAngle = 0;
 float smoothedAngularVelocity = 0;
 int angleStableCount = 0; // Counter for stable angle samples
@@ -78,11 +78,11 @@ void setup() {
   Serial.begin(115200);
   SimpleFOCDebug::enable(&Serial);
 
-  // Inizializzazione sensore angolo
+  // Angle sensor initialization
   tle5012Sensor.init();
   motor.linkSensor(&tle5012Sensor);
 
-  // Configurazione driver
+  // Driver configuration
   driver.voltage_power_supply = 12;
   driver.voltage_limit = 6;
   if (!driver.init()) {
@@ -91,7 +91,7 @@ void setup() {
   }
   motor.linkDriver(&driver);
 
-  // Configurazione motore
+  // Motor configuration
   motor.voltage_sensor_align = 2;
   motor.foc_modulation = FOCModulationType::SpaceVectorPWM;
   motor.controller = MotionControlType::torque;
@@ -100,17 +100,17 @@ void setup() {
   Serial.println(F("Motor ready."));
 
 #if ENABLE_MAGNETIC_SENSOR
-  // Inizializzazione sensore 3D
+  // 3D sensor initialization
   dut.begin();
   calibrateSensor();
-  Serial.println("Calibrazione sensore 3D completata");
+  Serial.println("3D sensor calibration completed");
 
-  // Configurazione pulsanti
+  // Button configuration
   pinMode(BUTTON1, INPUT_PULLUP);
   pinMode(BUTTON2, INPUT_PULLUP);
 #endif
 
-  Serial.println("Sistema pronto");
+  Serial.println("System ready");
 #if ENABLE_COMMANDER
   command.add('T', doTarget, "target voltage");
 #endif
@@ -119,11 +119,11 @@ void setup() {
 
 void loop() {
 #if ENABLE_MAGNETIC_SENSOR
-  // Lettura pulsante con rilevamento fronte
+  // Button reading with edge detection
   bool button1State = digitalRead(BUTTON1);
   bool button2State = digitalRead(BUTTON2);  // Add reading of button 2 state
   
-  // Acquisizione dati sensore 3D
+  // 3D sensor data acquisition
   double x, y, z;
   dut.setSensitivity(TLx493D_FULL_RANGE_e);
   dut.getMagneticField(&x, &y, &z);
@@ -132,10 +132,10 @@ void loop() {
   z -= zOffset;
 
 
-  // Calcolo pressione come magnitudine vettoriale
+  // Calculate pressure as vector magnitude
   currentPressure = sqrt(x*x + y*y + z*z);
   
-  // Calcolo derivata filtrata
+  // Calculate filtered derivative
   unsigned long currentTime = millis();
   float dt = (currentTime - previousTime) / 1000.0f;
   if(dt > 0) {
@@ -168,14 +168,14 @@ void loop() {
   }
   prevButton2State = button2State;
 
-  // Macchina a stati per controllo chiusura
+  // State machine for closure control
   if(canClose && button1State == LOW && prevButton1State == HIGH) {
-    // Fronte di discesa pulsante
+    // Button falling edge
     isClosing = true;
     closingStartTime = currentTime;
-    dpdtStableCount = 0; // Resetta il contatore all'inizio della chiusura
+    dpdtStableCount = 0; // Reset counter at the beginning of closure
     angleStableCount = 0; // Reset angle stability counter
-    Serial.println("Inizio chiusura...");
+    Serial.println("Starting closure...");
   }
   prevButton1State = button1State;
 
@@ -189,30 +189,30 @@ void loop() {
   }
 
   if(isClosing) {
-    // Calcolo soglie dinamiche
+    // Calculate dynamic thresholds
     float dpdtThreshold = (DP_DT_THRESHOLD / 100.0) * PRESSURE_MAX;
     
-    // Condizioni di stop prioritarie
+    // Priority stop conditions
     if(currentPressure >= PRESSURE_MAX) {
-      Serial.println("Stop: pressione massima raggiunta");
+      Serial.println("Stop: maximum pressure reached");
       isClosing = false;
     }
     else if((currentTime - closingStartTime) > TIMEOUT_MS) {
-      Serial.println("Stop: timeout sicurezza");
+      Serial.println("Stop: safety timeout");
       isClosing = false;
     }
-    // Controllo derivata pressione solo se non già fermato per altri motivi
+    // Check pressure derivative only if not already stopped for other reasons
     else {
         if(smoothedDpdt <= dpdtThreshold) {
             dpdtStableCount++;
             if (dpdtStableCount >= DPDT_STABLE_SAMPLES) {
-                Serial.print("Stop: pressione stabilizzata (derivata bassa per ");
+                Serial.print("Stop: pressure stabilized (low derivative for ");
                 Serial.print(DPDT_STABLE_SAMPLES);
-                Serial.println(" campioni)");
+                Serial.println(" samples)");
                 isClosing = false;
             }
         } else {
-            dpdtStableCount = 0; // Resetta il contatore se la derivata non è più bassa
+            dpdtStableCount = 0; // Reset counter if derivative is no longer low
         }
         
         // Check if angle has stopped moving
@@ -228,22 +228,22 @@ void loop() {
     }
     
     if(!isClosing) {
-      target_voltage = -0.5;  // Tensione di mantenimento
+      target_voltage = -0.5;  // Holding voltage
       canClose = false;  // Disable closing until Button 2 is pressed
       Serial.println("Closing locked until Button 2 is pressed");
     } else {
-      target_voltage = -3.0;  // Tensione di chiusura
+      target_voltage = -3.0;  // Closing voltage
     }
   } 
   else if(digitalRead(BUTTON2) == LOW) {
-    target_voltage = 2.0;  // Apertura
+    target_voltage = 2.0;  // Opening
     // Note: when button is released, the falling edge handler above will restart closing
   } 
   else {
-    target_voltage = -0.3; // Mantenimento
+    target_voltage = -0.3; // Holding
   }
 
-  // Invio dati diagnostici
+  // Send diagnostic data
   Serial.print("P:");
   Serial.print(currentPressure);
   Serial.print(",dP/dt:");
@@ -253,7 +253,7 @@ void loop() {
  
 #endif
 
-  // Aggiornamento sensore e controllo motore
+  // Sensor update and motor control
   tle5012Sensor.update();
   motor.loopFOC();
   motor.move(target_voltage);
@@ -269,7 +269,7 @@ void loop() {
 void calibrateSensor() {
   double sumX = 0, sumY = 0, sumZ = 0;
 
-  Serial.println("Calibrazione in corso...");
+  Serial.println("Calibration in progress...");
   for(int i=0; i<CALIBRATION_SAMPLES; i++) {
     double temp, x, y, z;
     dut.getMagneticFieldAndTemperature(&x, &y, &z, &temp);
@@ -284,7 +284,7 @@ void calibrateSensor() {
   yOffset = sumY / CALIBRATION_SAMPLES;
   zOffset = sumZ / CALIBRATION_SAMPLES;
   
-  Serial.println("\nOffset calcolati:");
+  Serial.println("\nCalculated offsets:");
   Serial.print("X: "); Serial.println(xOffset);
   Serial.print("Y: "); Serial.println(yOffset);
   Serial.print("Z: "); Serial.println(zOffset);
